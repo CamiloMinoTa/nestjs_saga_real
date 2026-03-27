@@ -1,0 +1,6 @@
+
+{
+  "name": "nestjs-saga-real",
+  "private": true,
+  "workspaces": ["order-service", "payment-service"]
+}
