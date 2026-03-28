@@ -1,174 +1,320 @@
+# Arquitectura del Proyecto: Microservicios, SAGA y Hexagonal
 
-# NestJS SAGA (TCP) - Proyecto de Microservicios con Arquitectura Hexagonal
+## Introducción
 
-## Descripción General
+Este documento detalla cómo la estructura de carpetas y archivos del proyecto implementa las arquitecturas de microservicios, el patrón SAGA y la arquitectura hexagonal. Se explica por servicio, carpeta y archivo, mostrando cómo contribuyen a cada patrón. El proyecto usa NestJS con TCP para comunicación entre servicios. Se incluyen snippets de código con comentarios para ilustrar implementaciones clave.
 
-Este proyecto es una implementación práctica de microservicios utilizando **NestJS**, enfocada en demostrar el patrón **SAGA** para manejar transacciones distribuidas y la **arquitectura hexagonal** (también conocida como arquitectura de puertos y adaptadores) en partes clave del sistema. Está diseñado como un ejemplo educativo para un sistema de e-commerce básico, donde se gestionan pedidos y pagos de manera distribuida.
+## Order-Service
 
-El proyecto incluye dos microservicios principales (`order-service` y `payment-service`), un frontend en React (usando Vite), y está configurado como un monorepo con workspaces de npm. Los servicios se comunican entre sí usando TCP, permitiendo una arquitectura distribuida y escalable.
+### Arquitectura Hexagonal Implementada Completamente
 
-### Propósito
-- Demostrar cómo coordinar transacciones distribuidas en microservicios sin transacciones globales.
-- Mostrar la separación de responsabilidades mediante la arquitectura hexagonal.
-- Proporcionar un ejemplo "ready to run" que se puede extender fácilmente (ej. agregar bases de datos, más servicios o lógica de negocio).
+#### src/domain/
+- **order.entity.ts**: Define la clase `Order` con propiedades `id` (string) y `status` ('CREATED' | 'CONFIRMED' | 'CANCELLED'). Representa el núcleo del dominio puro, encapsulando la lógica de negocio sin dependencias externas. Cumple la arquitectura hexagonal al mantener la entidad independiente de frameworks o infraestructura.
 
-## Arquitecturas Implementadas
+  ```typescript
+  // Entidad de dominio puro: representa un pedido sin dependencias externas (hexagonal - domain layer)
+  export class Order {
+    constructor(
+      public id: string,
+      public status: 'CREATED' | 'CONFIRMED' | 'CANCELLED',
+    ) {}
+  }
+  ```
 
-### 1. Arquitectura de Microservicios
-- **Descripción**: El sistema está dividido en servicios independientes que se ejecutan de forma autónoma. Cada servicio tiene su propia base de código, dependencias y ciclo de vida.
-- **Servicios**:
-  - **order-service**: Maneja la creación y gestión de pedidos. Actúa como el servicio orquestador principal.
-  - **payment-service**: Maneja el procesamiento de pagos asociados a los pedidos.
-  - **frontend**: Aplicación React simple para interactuar con los servicios (actualmente un boilerplate básico).
-- **Comunicación**: Los servicios usan TCP (protocolo interno de NestJS) para intercambiar mensajes, lo que permite una comunicación eficiente y desacoplada.
-- **Ventajas**: Escalabilidad, mantenibilidad y resiliencia. Cada servicio puede desplegarse y escalarse independientemente.
+#### src/ports/
+- **order.repository.ts**: Interfaz `OrderRepository` que define contratos para operaciones como `save(order: Order)` y `findById(id: string)`. Actúa como puerto de salida, desacoplando la capa de aplicación de implementaciones concretas de persistencia.
 
-### 2. Patrón SAGA
-- **Descripción**: SAGA es un patrón para manejar transacciones distribuidas en microservicios. Coordina una serie de operaciones locales, permitiendo compensaciones (rollback) si una operación falla, manteniendo la consistencia eventual.
-- **Tipo implementado**: Combinación de **orquestración** (en `order-service`) y **coreografía** (en `payment-service`).
-- **Dónde se aplica**:
-  - **order-service**: El archivo `src/saga/order.saga.ts` define la saga orquestrada. Inicia el flujo, envía mensajes TCP al `payment-service` y maneja las respuestas para confirmar o cancelar pedidos.
-  - **payment-service**: El archivo `src/saga/payment.listener.ts` actúa como listener, procesa pagos y envía eventos de vuelta (éxito o fallo).
-- **Flujo típico**:
-  1. Usuario crea un pedido vía POST a `/orders`.
-  2. `order-service` inicia la saga y envía mensaje a `payment-service`.
-  3. `payment-service` procesa el pago (simulado con lógica aleatoria).
-  4. Respuesta: Si éxito, confirma pedido; si fallo, cancela.
-  5. Eventos en logs: `order_created`, `payment_success` o `payment_failed`, `order CONFIRMED` o `CANCELLED`.
-- **Ventajas**: Evita inconsistencias en sistemas distribuidos, ideal para escenarios como e-commerce donde las operaciones deben ser atómicas a nivel distribuido.
+  ```typescript
+  import { Order } from '../domain/order.entity';
 
-### 3. Arquitectura Hexagonal (Puertos y Adaptadores)
-- **Descripción**: También conocida como arquitectura limpia, separa la lógica de negocio (dominio) de las preocupaciones externas (frameworks, bases de datos, APIs). Hace el código más testable, mantenible y desacoplado.
-- **Capas**:
-  - **Dominio (Domain)**: Lógica de negocio pura, sin dependencias externas.
-  - **Puertos (Ports)**: Interfaces que definen contratos para interactuar con el exterior (ej. repositorios).
-  - **Adaptadores (Adapters)**: Implementaciones concretas de los puertos (ej. controladores HTTP, repositorios en memoria).
-  - **Aplicación (Application)**: Servicios que orquestan la lógica usando los puertos.
-- **Dónde se aplica**:
-  - **order-service**: Completamente estructurado en capas hexagonales:
-    - `src/domain/order.entity.ts`: Entidad `Order` (dominio puro).
-    - `src/ports/order.repository.ts`: Interfaz del repositorio (puerto).
-    - `src/adapters/order.repository.impl.ts`: Implementación en memoria (adaptador).
-    - `src/adapters/order.controller.ts`: Controlador HTTP (adaptador de entrada).
-    - `src/application/order.service.ts`: Servicio de aplicación que usa el puerto.
-  - **payment-service**: No está completamente implementado en hexagonal; se enfoca en la lógica de pago y saga, pero puede extenderse.
-- **Ventajas**: Fácil cambiar adaptadores (ej. de memoria a base de datos) sin modificar el dominio. Mejora la testabilidad y el mantenimiento.
+  // Puerto de salida: interfaz que define contratos para persistencia (hexagonal - ports layer)
+  export interface OrderRepository {
+    save(order: Order): Promise<void>;
+    findById(id: string): Promise<Order | undefined>;
+  }
+  ```
 
-## Estructura del Proyecto
+#### src/adapters/
+- **order.controller.ts**: Controlador `@Controller('orders')` con endpoint POST para crear pedidos. Es un adaptador de entrada que traduce solicitudes HTTP REST a llamadas del servicio de aplicación, exponiendo la API externa.
 
-```
-nestjs_saga_real/
-├── package.json                 # Configuración del monorepo (workspaces)
-├── README.md                    # Este archivo
-├── frontend/                    # Aplicación React (Vite)
-│   ├── package.json
-│   ├── src/
-│   │   ├── App.tsx
-│   │   └── ...
-│   └── vite.config.ts
-├── order-service/               # Microservicio de pedidos
-│   ├── package.json
-│   ├── src/
-│   │   ├── app.module.ts
-│   │   ├── main.ts
-│   │   ├── domain/              # Arquitectura hexagonal: dominio
-│   │   │   └── order.entity.ts
-│   │   ├── ports/               # Arquitectura hexagonal: puertos
-│   │   │   └── order.repository.ts
-│   │   ├── adapters/            # Arquitectura hexagonal: adaptadores
-│   │   │   ├── order.controller.ts
-│   │   │   └── order.repository.impl.ts
-│   │   ├── application/         # Arquitectura hexagonal: aplicación
-│   │   │   └── order.service.ts
-│   │   └── saga/                # Patrón SAGA: orquestración
-│   │       └── order.saga.ts
-│   └── tsconfig.json
-└── payment-service/             # Microservicio de pagos
-    ├── package.json
-    ├── src/
-    │   ├── app.module.ts
-    │   ├── main.ts
-    │   ├── application/
-    │   │   └── payment.service.ts
-    │   └── saga/                # Patrón SAGA: coreografía
-    │       └── payment.listener.ts
-    └── tsconfig.json
-```
+  ```typescript
+  import { Controller, Post } from '@nestjs/common';
+  import { OrderService } from '../application/order.service';
 
-## Requisitos
-- Node.js 18+
-- npm (viene con Node.js)
+  // Adaptador de entrada: traduce HTTP a lógica de aplicación (hexagonal - adapters layer)
+  @Controller('orders')
+  export class OrderController {
+    constructor(private readonly service: OrderService) {}
 
-## Instalación
-Desde la raíz del proyecto:
-```bash
-npm install
-```
-Esto instala dependencias para todos los workspaces (order-service, payment-service y frontend).
+    @Post()
+    create() {
+      return this.service.createOrder();
+    }
+  }
+  ```
 
-## Ejecución
-Ejecuta cada servicio en terminales separadas para simular un entorno distribuido.
+- **order.repository.impl.ts**: Clase `InMemoryOrderRepository` que implementa `OrderRepository` usando un `Map` para almacenamiento en memoria. Adaptador de salida que cumple el puerto, permitiendo cambiar fácilmente a una base de datos (ej. MongoDB) sin modificar el dominio o aplicación.
 
-1. **Payment Service**:
-   ```bash
-   cd payment-service && npm run start:dev
-   ```
+  ```typescript
+  import { OrderRepository } from '../ports/order.repository';
+  import { Order } from '../domain/order.entity';
 
-2. **Order Service**:
-   ```bash
-   cd order-service && npm run start:dev
-   ```
+  // Adaptador de salida: implementación concreta del puerto (hexagonal - adapters layer)
+  export class InMemoryOrderRepository implements OrderRepository {
+    private orders = new Map<string, Order>();
 
-3. **Frontend** (opcional, para desarrollo):
-   ```bash
-   cd frontend && npm run dev
-   ```
+    async save(order: Order) {
+      this.orders.set(order.id, order);
+    }
 
-Los servicios estarán disponibles en:
-- Order Service: `http://localhost:3001`
-- Payment Service: `http://localhost:3002` (o similar, verifica logs)
-- Frontend: `http://localhost:5173` (si ejecutas)
+    async findById(id: string) {
+      return this.orders.get(id);
+    }
+  }
+  ```
 
-## Pruebas
-### Crear un pedido
-Envía una solicitud POST para crear un pedido:
-```bash
-curl -X POST http://localhost:3001/orders
-```
+#### src/application/
+- **order.service.ts**: Servicio `@Injectable` que orquesta la lógica de negocio. Crea pedidos, confirma/cancela usando el puerto del repositorio, y emite eventos TCP. Capa de aplicación que coordina operaciones sin depender de detalles de infraestructura.
 
-### Verificar el flujo SAGA
-Revisa los logs en las terminales de los servicios. Deberías ver un flujo como:
-- `order_created`
-- `payment_success` o `payment_failed` (aleatorio en la simulación)
-- `order CONFIRMED` o `CANCELLED`
+  ```typescript
+  import { Inject, Injectable } from '@nestjs/common';
+  import { ClientProxy } from '@nestjs/microservices';
+  import { OrderRepository } from '../ports/order.repository';
+  import { Order } from '../domain/order.entity';
+  import { randomUUID } from 'crypto';
 
-Si el pago falla, el pedido se cancela automáticamente, demostrando la compensación en SAGA.
+  // Servicio de aplicación: orquesta lógica usando puertos (hexagonal - application layer)
+  @Injectable()
+  export class OrderService {
+    constructor(
+      @Inject('OrderRepository') private readonly repo: OrderRepository,
+      @Inject('PAYMENT_SERVICE') private readonly client: ClientProxy,
+    ) {}
 
-### Otras pruebas
-- Verifica endpoints adicionales si los agregas (ej. GET `/orders/:id`).
-- Prueba con herramientas como Postman para solicitudes más complejas.
+    async createOrder(): Promise<Order> {
+      const order = new Order(randomUUID(), 'CREATED');
+      await this.repo.save(order);
 
-## Detalles Técnicos
-- **Tecnologías**: NestJS (framework), TypeScript, TCP para comunicación interna, React + Vite para frontend.
-- **Persistencia**: Actualmente simulada en memoria (arrays). Para producción, agrega bases de datos (ej. MongoDB, PostgreSQL) reemplazando los adaptadores.
-- **Manejo de errores**: Básico; extiende con compensaciones completas en SAGA (ej. reembolsos).
-- **Escalabilidad**: Los servicios pueden desplegarse en contenedores (Docker) o plataformas como Kubernetes.
+      console.log('EVENT -> order_created', order.id);
+      this.client.emit('order_created', order.id); // Emite evento para SAGA
 
-## Extensiones y Mejoras Posibles
-- **Agregar bases de datos**: Implementa repositorios reales (ej. MongoDB en `order.repository.impl.ts`).
-- **Más servicios**: Agrega inventory-service o shipping-service con SAGA extendida.
-- **Frontend completo**: Integra el frontend con los servicios vía REST o GraphQL.
-- **Autenticación**: Agrega JWT o OAuth.
-- **Monitoreo**: Integra herramientas como Prometheus o ELK stack.
-- **Pruebas**: Agrega tests unitarios (Jest) y de integración.
-- **Docker**: Conteneriza los servicios para despliegue fácil.
+      return order;
+    }
 
-## Contribución
-Este es un proyecto educativo. Siéntete libre de forkear, modificar y contribuir. Para preguntas, abre un issue en el repositorio.
+    async confirm(id: string) {
+      const order = await this.repo.findById(id);
+      if (!order) return;
+      order.status = 'CONFIRMED';
+      await this.repo.save(order);
+      console.log('ORDER CONFIRMED', id);
+    }
 
-## Licencia
-MIT License (o la que apliques).
+    async cancel(id: string) {
+      const order = await this.repo.findById(id);
+      if (!order) return;
+      order.status = 'CANCELLED';
+      await this.repo.save(order);
+      console.log('ORDER CANCELLED', id);
+    }
+  }
+  ```
 
----
+#### src/saga/
+- **order.saga.ts**: Controlador `@Controller` con decoradores `@EventPattern` para escuchar eventos 'payment_success' y 'payment_failed'. Implementa la orquestración en el patrón SAGA, coordinando el flujo distribuido al actualizar pedidos basado en respuestas del payment-service.
 
-¡Disfruta explorando microservicios con NestJS, SAGA y arquitectura hexagonal!
+  ```typescript
+  import { Controller } from '@nestjs/common';
+  import { EventPattern, Payload } from '@nestjs/microservices';
+  import { OrderService } from '../application/order.service';
+
+  // Orquestración SAGA: coordina flujo distribuido escuchando eventos (SAGA pattern)
+  @Controller()
+  export class OrderSaga {
+    constructor(private readonly service: OrderService) {}
+
+    @EventPattern('payment_success')
+    handleSuccess(@Payload() orderId: string) {
+      console.log('EVENT <- payment_success', orderId);
+      this.service.confirm(orderId); // Confirma pedido en caso de éxito
+    }
+
+    @EventPattern('payment_failed')
+    handleFail(@Payload() orderId: string) {
+      console.log('EVENT <- payment_failed', orderId);
+      this.service.cancel(orderId); // Cancela pedido en caso de fallo (compensación)
+    }
+  }
+  ```
+
+#### src/
+- **app.module.ts**: Módulo `@Module` que configura dependencias: importa `ClientsModule` para TCP a payment-service (puerto 4002), registra controladores (OrderController, OrderSaga) y proveedores (OrderService con inyección de 'OrderRepository'). Integra hexagonal (inyecta repositorio) y microservicios (comunicación TCP).
+
+  ```typescript
+  import { Module } from '@nestjs/common';
+  import { ClientsModule, Transport } from '@nestjs/microservices';
+  import { OrderController } from './adapters/order.controller';
+  import { OrderService } from './application/order.service';
+  import { OrderSaga } from './saga/order.saga';
+  import { InMemoryOrderRepository } from './adapters/order.repository.impl';
+
+  // Módulo que integra hexagonal y microservicios
+  @Module({
+    imports: [
+      ClientsModule.register([
+        {
+          name: 'PAYMENT_SERVICE',
+          transport: Transport.TCP,
+          options: { host: 'localhost', port: 4002 }, // Comunicación TCP con payment-service
+        },
+      ]),
+    ],
+    controllers: [OrderController, OrderSaga],
+    providers: [
+      OrderService,
+      {
+        provide: 'OrderRepository',
+        useClass: InMemoryOrderRepository, // Inyección de adaptador (hexagonal)
+      },
+    ],
+  })
+  export class AppModule {}
+  ```
+
+- **main.ts**: Punto de entrada que crea un microservicio TCP en puerto 4001 usando `NestFactory.createMicroservice`. Habilita la comunicación asíncrona en la arquitectura de microservicios.
+
+  ```typescript
+  import 'reflect-metadata';
+  import { NestFactory } from '@nestjs/core';
+  import { AppModule } from './app.module';
+  import { Transport } from '@nestjs/microservices';
+
+  // Punto de entrada: configura microservicio TCP (microservicios architecture)
+  async function bootstrap() {
+    const app = await NestFactory.createMicroservice(AppModule, {
+      transport: Transport.TCP,
+      options: { host: 'localhost', port: 4001 },
+    });
+
+    await app.listen();
+    console.log('Order TCP microservice on 4001');
+  }
+  bootstrap();
+  ```
+
+### Cómo Cumple las Arquitecturas
+- **Hexagonal**: Separación estricta en domain (entidad pura), ports (interfaces), adapters (implementaciones concretas), application (lógica orquestada). Permite testabilidad (mocks en puertos) y cambios (ej. BD) sin afectar dominio.
+- **SAGA**: Orquestración centralizada: emite 'order_created' y escucha respuestas para confirmar/cancelar, manejando transacciones distribuidas con compensaciones.
+- **Microservicios**: Servicio autónomo con API REST y comunicación TCP, ejecutándose en puerto separado para escalabilidad independiente.
+
+## Payment-Service
+
+### Estructura Simplificada (Hexagonal Parcial)
+
+#### src/application/
+- **payment.service.ts**: Servicio `@Injectable` que procesa pagos simulados con `Math.random()` (50% éxito/fallo). Emite eventos 'payment_success' o 'payment_failed' vía TCP. Capa de aplicación básica que maneja lógica de pago sin separación hexagonal completa.
+
+  ```typescript
+  import { Inject, Injectable } from '@nestjs/common';
+  import { ClientProxy } from '@nestjs/microservices';
+
+  // Servicio de aplicación básico: procesa pagos y emite eventos (parcial hexagonal)
+  @Injectable()
+  export class PaymentService {
+    constructor(
+      @Inject('ORDER_SERVICE') private readonly client: ClientProxy,
+    ) {}
+
+    process(orderId: string) {
+      const success = Math.random() > 0.5; // Simulación aleatoria
+
+      if (success) {
+        console.log('EVENT -> payment_success', orderId);
+        this.client.emit('payment_success', orderId); // Éxito en SAGA
+      } else {
+        console.log('EVENT -> payment_failed', orderId);
+        this.client.emit('payment_failed', orderId); // Fallo en SAGA
+      }
+    }
+  }
+  ```
+
+#### src/saga/
+- **payment.listener.ts**: Controlador `@Controller` con `@EventPattern('order_created')` para escuchar creación de pedidos. Implementa coreografía en SAGA, respondiendo a eventos del order-service sin orquestrador central.
+
+  ```typescript
+  import { Controller } from '@nestjs/common';
+  import { EventPattern, Payload } from '@nestjs/microservices';
+  import { PaymentService } from '../application/payment.service';
+
+  // Coreografía SAGA: responde a eventos sin orquestrador central (SAGA pattern)
+  @Controller()
+  export class PaymentListener {
+    constructor(private readonly service: PaymentService) {}
+
+    @EventPattern('order_created')
+    handle(@Payload() orderId: string) {
+      console.log('EVENT <- order_created', orderId);
+      this.service.process(orderId); // Procesa pago en respuesta a evento
+    }
+  }
+  ```
+
+#### src/
+- **app.module.ts**: Módulo `@Module` que configura `ClientsModule` para TCP a order-service (puerto 4001). Registra PaymentListener como controlador y PaymentService como proveedor. Integra comunicación en microservicios.
+
+  ```typescript
+  import { Module } from '@nestjs/common';
+  import { ClientsModule, Transport } from '@nestjs/microservices';
+  import { PaymentService } from './application/payment.service';
+  import { PaymentListener } from './saga/payment.listener';
+
+  // Módulo que integra microservicios vía TCP
+  @Module({
+    imports: [
+      ClientsModule.register([
+        {
+          name: 'ORDER_SERVICE',
+          transport: Transport.TCP,
+          options: { host: 'localhost', port: 4001 }, // Comunicación con order-service
+        },
+      ]),
+    ],
+    controllers: [PaymentListener],
+    providers: [PaymentService],
+  })
+  export class AppModule {}
+  ```
+
+- **main.ts**: Punto de entrada que crea microservicio TCP en puerto 4002. Servicio autónomo que responde a eventos.
+
+  ```typescript
+  import 'reflect-metadata';
+  import { NestFactory } from '@nestjs/core';
+  import { AppModule } from './app.module';
+  import { Transport } from '@nestjs/microservices';
+
+  // Punto de entrada: configura microservicio TCP (microservicios architecture)
+  async function bootstrap() {
+    const app = await NestFactory.createMicroservice(AppModule, {
+      transport: Transport.TCP,
+      options: { host: 'localhost', port: 4002 },
+    });
+
+    await app.listen();
+    console.log('Payment TCP microservice on 4002');
+  }
+  bootstrap();
+  ```
+
+### Cómo Cumple las Arquitecturas
+- **Hexagonal**: Parcial; application maneja lógica, pero falta domain/ports/adapters explícitos. Puede extenderse agregando entidades de pago y repositorios.
+- **SAGA**: Coreografía: escucha eventos y emite respuestas, coordinando transacciones distribuidas de manera descentralizada.
+- **Microservicios**: Servicio independiente con TCP, procesando pagos en respuesta a eventos del order-service.
+
+## Notas Generales sobre las Arquitecturas
+- **Microservicios**: Servicios separados (order y payment) permiten despliegue independiente, con TCP asegurando comunicación eficiente y acoplamiento bajo. Cada uno tiene su main.ts y app.module.ts para autonomía.
+- **SAGA**: Patrón distribuido implementado con eventos TCP: orquestración en order-service inicia y coordina, coreografía en payment-service responde. Maneja fallos con compensaciones (cancelar pedido si pago falla), evitando inconsistencias.
+- **Hexagonal**: Solo order-service la implementa completamente para demostrar separación; payment-service es más pragmático. Beneficios: fácil testing (inyectar mocks), mantenibilidad (cambiar adaptadores sin tocar dominio).
+- **Extensiones**: Para producción, reemplaza `InMemoryOrderRepository` por BD (ej. TypeORM), agrega compensaciones en SAGA (reembolsos), y completa hexagonal en payment-service.
+
+Este README explica la estructura y roles; revisa los archivos para código detallado. Para ejecutar, sigue el README.md principal.
